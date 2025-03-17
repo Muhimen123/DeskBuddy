@@ -8,6 +8,11 @@
 
 #include "font/passion_one_64.c"
 #include "font/passion_one_24.c"
+#include "font/fontawesome.c"
+LV_FONT_DECLARE(fontawesome)
+
+#define CUSTOM_CLOCK_SYMBOL "\xEF\x80\x97"
+
 
 #define XPT2046_IRQ 36   // T_IRQ
 #define XPT2046_MOSI 32  // T_DIN
@@ -21,16 +26,25 @@ XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 320
 
-#define SSID "SSID"
-#define PASSWORD "PASSWORD"
+#define SSID "ssid"
+#define PASSWORD "password"
 
 int x, y, z;
+
+bool clock_state = false;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 21600, 60000);
 
 #define DRAW_BUF_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT / 10 * (LV_COLOR_DEPTH / 8))
 uint32_t draw_buf[DRAW_BUF_SIZE / 4];
+
+
+uint32_t dark_blue = 0xB4BEFE;
+
+static lv_style_t label_style, label_style2, label_style3;
+
+lv_obj_t *hour_label, *minute_label, *day_label, *meridian_label;
 
 void log_print(lv_log_level_t level, const char * buf) {
   LV_UNUSED(level);
@@ -69,21 +83,48 @@ lv_obj_t* add_rounded_rectangle(short x, short y, short ht, short wt, uint32_t c
   return rect;
 }
 
-lv_obj_t *hour_label, *minute_label, *day_label, *meridian_label;
+lv_obj_t* add_rounded_button(short x, short y, short ht, short wt, uint32_t color) {
+  lv_obj_t *btn = lv_button_create(lv_scr_act());  // Create a button
+  lv_obj_set_size(btn, wt, ht);  // Set button size
+  lv_obj_set_style_bg_color(btn, lv_color_hex(color), LV_PART_MAIN);  // Set button color
+  lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);  // Set rounded corners
+  lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);  // Remove border
+  lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);  // Position the button
+  lv_obj_set_style_pad_all(btn, 0, LV_PART_MAIN);  // Remove padding
 
-void clock_gui(void) {
+  return btn;
+}
+
+//BUTTON CALL BACKS
+static void clock_button_cb(lv_event_t * e) {
+  if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+    lv_obj_clean(lv_scr_act());
+    clock_state = true;
+    clock_gui();
+  }
+}
+
+
+void dashboard_gui() {
   lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x181825), LV_PART_MAIN);
 
-  // setting label style
-  static lv_style_t label_style;
-  lv_style_init(&label_style);
-  lv_style_set_text_font(&label_style, &passion_one_64);
-  lv_style_set_text_color(&label_style, lv_color_black());
+  // Clock button
+  lv_obj_t *clock_button_bg = add_rounded_button(65, 77, 86, 86, dark_blue);
+  lv_obj_t *clock_symbol = lv_label_create(clock_button_bg);
+  lv_label_set_text(clock_symbol, CUSTOM_CLOCK_SYMBOL);
+  lv_obj_set_style_text_font(clock_symbol, &fontawesome, 0);
+  lv_obj_set_style_text_color(clock_symbol, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_align(clock_symbol, LV_ALIGN_CENTER, 0, 0);
 
-  static lv_style_t label_style2;
-  lv_style_init(&label_style2);
-  lv_style_set_text_font(&label_style2, &passion_one_24);
-  lv_style_set_text_color(&label_style2, lv_color_black());
+  lv_obj_add_event_cb(clock_button_bg, clock_button_cb, LV_EVENT_CLICKED, NULL);
+
+
+  // pomodoro button
+  // lv_obj_t *pomodoro_button_bg = add_rounded_rectangle(169, 77, 86, 86, dark_blue);
+}
+
+void clock_gui(void) {
+  lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x181825), LV_PART_MAIN);  
 
   // Hour section
   lv_obj_t *hour_bg = add_rounded_rectangle(36, 68, 104, 86, 0xB4BEFE);
@@ -105,7 +146,7 @@ void clock_gui(void) {
   lv_obj_t *day_bg = add_rounded_rectangle(236, 71, 45, 62, 0xA6E3A1);
 
   day_label = lv_label_create(day_bg);
-  lv_label_set_text(day_label, "###");
+  lv_label_set_text(day_label, "SSS");
   lv_obj_align(day_label, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_style(day_label, &label_style2, 0);
 
@@ -119,6 +160,18 @@ void clock_gui(void) {
 }
 
 void setup() {
+  lv_style_init(&label_style);
+  lv_style_set_text_font(&label_style, &passion_one_64);
+  lv_style_set_text_color(&label_style, lv_color_black());
+
+  lv_style_init(&label_style3);
+  lv_style_set_text_font(&label_style3, &fontawesome);
+  lv_style_set_text_color(&label_style3, lv_color_black());
+
+  lv_style_init(&label_style2);
+  lv_style_set_text_font(&label_style2, &passion_one_24);
+  lv_style_set_text_color(&label_style2, lv_color_black());
+
   Serial.begin(115200);
   
   WiFi.begin(SSID, PASSWORD);
@@ -144,35 +197,39 @@ void setup() {
   lv_indev_set_read_cb(indev, touchscreen_read);
 
   timeClient.begin();
-  clock_gui();
+  //clock_gui();
+  dashboard_gui();
 }
 
 void loop() {
-  timeClient.update();
+  if(clock_state) {
+    timeClient.update();
 
-  time_t epoch_time = timeClient.getEpochTime();
+    time_t epoch_time = timeClient.getEpochTime();
 
-  struct tm *ptm = localtime(&epoch_time);
+    struct tm *ptm = localtime(&epoch_time);
 
-  char buffer[10];
+    char buffer[10];
 
-  int hour = ptm->tm_hour;
-  if(hour > 12) hour = hour - 12;
-  sprintf(buffer, "%02d", hour);
-  lv_label_set_text(hour_label, buffer);
+    int hour = ptm->tm_hour;
+    if(hour > 12) hour = hour - 12;
+    if(hour == 0) hour = 12;
+    sprintf(buffer, "%02d", hour);
+    lv_label_set_text(hour_label, buffer);
 
-  sprintf(buffer, "%02d", ptm->tm_min);
-  lv_label_set_text(minute_label, buffer);
+    sprintf(buffer, "%02d", ptm->tm_min);
+    lv_label_set_text(minute_label, buffer);
 
-  char* days[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+    char* days[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 
-  char* day_name =days[ptm->tm_wday];
-  lv_label_set_text(day_label, day_name);
+    char* day_name =days[ptm->tm_wday];
+    lv_label_set_text(day_label, day_name);
 
-  const char* meri = (ptm->tm_hour < 12) ? "AM" : "PM";
-  lv_label_set_text(meridian_label, meri);
+    const char* meri = (ptm->tm_hour < 12) ? "AM" : "PM";
+    lv_label_set_text(meridian_label, meri);
+  }
   
   lv_task_handler(); 
   lv_tick_inc(5);
-  delay(2000);
+  delay(5);
 }
