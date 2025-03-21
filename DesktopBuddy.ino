@@ -30,9 +30,15 @@ XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 #define SSID "ssid"
 #define PASSWORD "password"
 
-int x, y, z;
+const short break_time = 300;
+const short focus_time = 1500;
 
+int x, y, z, pomo_timer;
+
+// States
 bool clock_state = false;
+bool pomodoro_focus_state = false;
+bool pomodoro_break_state = false;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 21600, 60000);
@@ -58,6 +64,12 @@ void log_print(lv_log_level_t level, const char * buf) {
   LV_UNUSED(level);
   Serial.println(buf);
   Serial.flush();
+}
+
+void reset_all_states() {
+  clock_state = false;
+  pomodoro_focus_state = false;
+  pomodoro_break_state = false;
 }
 
 void touchscreen_read(lv_indev_t * indev, lv_indev_data_t * data) {
@@ -133,6 +145,7 @@ lv_obj_t* add_icon_button(short x, short y, short ht, short wt, const char* icon
 static void clock_button_cb(lv_event_t * e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_clean(lv_scr_act());
+    reset_all_states();
     clock_state = true;
     clock_gui();
   }
@@ -141,7 +154,7 @@ static void clock_button_cb(lv_event_t * e) {
 static void home_button_cb(lv_event_t * e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_clean(lv_scr_act());
-    clock_state = false;
+    reset_all_states();
     dashboard_gui();
   }
 }
@@ -149,31 +162,38 @@ static void home_button_cb(lv_event_t * e) {
 static void pomodoro_focus_button_cb(lv_event_t * e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_clean(lv_scr_act());
-    clock_state = false;
+    reset_all_states();
+    pomodoro_focus_state = true;
+    pomo_timer = focus_time;
     pomodoro_focus_gui();
   }
 }
 
 static void pomodoro_focus_pause_button_cb(lv_event_t * e) {
-  Serial.println("Button Pressed");
+  pomodoro_focus_state = !pomodoro_focus_state;
 }
 
+// Takes the the break page
 static void pomodoro_focus_next_button_cb(lv_event_t * e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_clean(lv_scr_act());
-    clock_state = false;
+    reset_all_states();
+    pomodoro_break_state = true;
+    pomo_timer = break_time;
     pomodoro_break_gui();
   }
 }
 
 static void pomodoro_break_pause_button_cb(lv_event_t * e) {
-  Serial.println("Button Pressed");
+  pomodoro_break_state = !pomodoro_break_state;
 }
 
 static void pomodoro_break_next_button_cb(lv_event_t * e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     lv_obj_clean(lv_scr_act());
-    clock_state = false;
+    reset_all_states();
+    pomodoro_focus_state = true;
+    pomo_timer = focus_time;
     pomodoro_focus_gui();
   }
 }
@@ -254,13 +274,13 @@ void pomodoro_focus_gui() {
   // Colon
   lv_obj_t* colon_label = lv_label_create(lv_scr_act());
   lv_label_set_text(colon_label, ":");
-  lv_obj_align_to(colon_label, pomo_minute_label, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
+  lv_obj_align_to(colon_label, pomo_minute_label, LV_ALIGN_OUT_RIGHT_TOP, 5, 0);
   lv_obj_add_style(colon_label, &label_style4, 0);
 
   // Sec label
   pomo_second_label = lv_label_create(lv_scr_act());
   lv_label_set_text(pomo_second_label, "55");
-  lv_obj_align(pomo_second_label, LV_ALIGN_TOP_LEFT, 185, 75);
+  lv_obj_align_to(pomo_second_label, colon_label, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
   lv_obj_add_style(pomo_second_label, &label_style4, 0);
 
   // Focus label
@@ -297,13 +317,13 @@ void pomodoro_break_gui() {
   // Colon
   lv_obj_t* colon_label = lv_label_create(lv_scr_act());
   lv_label_set_text(colon_label, ":");
-  lv_obj_align_to(colon_label, pomo_break_minute_label, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
+  lv_obj_align_to(colon_label, pomo_break_minute_label, LV_ALIGN_OUT_RIGHT_TOP, 5, 0);
   lv_obj_add_style(colon_label, &label_style5, 0);
 
   // Sec label
   pomo_break_second_label = lv_label_create(lv_scr_act());
   lv_label_set_text(pomo_break_second_label, "25");
-  lv_obj_align(pomo_break_second_label, LV_ALIGN_TOP_LEFT, 185, 75);
+  lv_obj_align_to(pomo_break_second_label, colon_label, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
   lv_obj_add_style(pomo_break_second_label, &label_style5, 0);
 
   // Focus label
@@ -328,7 +348,40 @@ void pomodoro_break_gui() {
   lv_obj_t *home_button = add_home_button(green, light_green);
 }
 
+// Utility functions
+void decrement_counter(lv_timer_t* timer) {
+  if(pomodoro_focus_state || pomodoro_break_state) {
+
+    if(pomo_timer <= 0) {
+      lv_event_t e;
+      if(pomodoro_focus_state) {
+        // goes from focus to break
+        pomo_timer = break_time;
+        reset_all_states();
+        pomodoro_break_state = true;
+        lv_obj_clean(lv_scr_act());
+        pomodoro_break_gui();
+      }
+      else if(pomodoro_break_state) {
+        // goes from break to focus
+        pomo_timer = focus_time;
+        reset_all_states();
+        pomodoro_focus_state = true;
+        lv_obj_clean(lv_scr_act());
+        pomodoro_focus_gui();
+      }
+    } else {
+      pomo_timer--;  
+    }
+  }
+}
+
+
 void setup() {
+  lv_init();
+  // Register print function for debugging
+  lv_log_register_print_cb(log_print);
+
   lv_style_init(&label_style);
   lv_style_set_text_font(&label_style, &passion_one_64);
   lv_style_set_text_color(&label_style, lv_color_black());
@@ -356,11 +409,6 @@ void setup() {
     delay(500);
   }
 
-  // Start LVGL
-  lv_init();
-  // Register print function for debugging
-  lv_log_register_print_cb(log_print);
-
   touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   touchscreen.begin(touchscreenSPI);
   touchscreen.setRotation(2);
@@ -374,10 +422,14 @@ void setup() {
   lv_indev_set_read_cb(indev, touchscreen_read);
 
   timeClient.begin();
+  lv_timer_create(decrement_counter, 500, NULL); // this timer is not accurate -_- 
   dashboard_gui();
 }
 
+
+
 void loop() {
+  
   if(clock_state) {
     timeClient.update();
 
@@ -403,9 +455,35 @@ void loop() {
 
     const char* meri = (ptm->tm_hour < 12) ? "AM" : "PM";
     lv_label_set_text(meridian_label, meri);
+  } 
+
+  else if(pomodoro_focus_state) {
+    int mn = pomo_timer / 60;
+    int sc = pomo_timer % 60;
+    char buffer[10];
+    
+    sprintf(buffer, "%02d", mn);
+    lv_label_set_text(pomo_minute_label, buffer);
+
+    sprintf(buffer, "%02d", sc);
+    lv_label_set_text(pomo_second_label, buffer);
   }
-  
+
+  else if(pomodoro_break_state) {
+    int mn = pomo_timer / 60;
+    int sc = pomo_timer % 60;
+    char buffer[10];
+    
+    sprintf(buffer, "%02d", mn);
+    lv_label_set_text(pomo_break_minute_label, buffer);
+
+    sprintf(buffer, "%02d", sc);
+    lv_label_set_text(pomo_break_second_label, buffer);
+  }
+
+  lv_timer_handler();
   lv_task_handler(); 
-  lv_tick_inc(5);
-  delay(5);
+  lv_tick_inc(1);
+  delay(1);
 }
+
